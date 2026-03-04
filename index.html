@@ -3,16 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>油庫計算系統 V1.9.4</title>
+    <title>油庫計算系統 V1.9.0</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body { background-color: #000; color: #fff; font-family: sans-serif; padding-bottom: 20px; overflow-x: hidden; }
         .grid-table { border-collapse: separate; border-spacing: 0; width: 100%; min-width: 650px; table-layout: fixed; }
-        .grid-table td { border: 1px solid #333; padding: 2px; height: 35px; vertical-align: middle; text-align: center; font-size: 11px; overflow: hidden; }
-        /* V1.9.4 加寬 A 與 F 欄位權重 */
-        .grid-table td:nth-child(2), .grid-table td:nth-child(7) { width: 14%; } 
-        /* 同時縮小非關鍵欄位如 C, D, H, I 的寬度平衡 */
-        .grid-table td:nth-child(4), .grid-table td:nth-child(5), .grid-table td:nth-child(9), .grid-table td:nth-child(10) { width: 11%; }
+        .grid-table td { border: 1px solid #333; padding: 2px; height: 35px; vertical-align: middle; text-align: center; font-size: 11px; }
         .cell-label { background-color: #111; color: #555; width: 25px; font-size: 10px; border: none !important; }
         
         /* 計算機專用顏色 */
@@ -55,7 +51,7 @@
         <button onclick="handleReset();" class="px-3 py-1 bg-red-700 rounded text-xs font-bold">🧹 重置</button>
         <button id="wakeLockBtn" onclick="toggleWakeLock();vibrate(15);" class="px-3 py-1 bg-gray-700 rounded text-xs font-bold">🔆 常亮: 偵測中</button>
     </div>
-    <div id="saveStatus" class="text-[10px] text-slate-500 text-right font-mono">V1.9.4 - UI FIX</div>
+    <div id="saveStatus" class="text-[10px] text-slate-500 text-right font-mono">V1.9.0 - UI FIX</div>
 </div>
 
 <div id="page-calc" class="page-content overflow-x-auto">
@@ -131,25 +127,22 @@
 
     function handleReset() {
         if(!confirm(`確定重置【${currentTab === 'calc' ? '計算機' : (currentTab === 'dalin' ? '大林' : '高松')}】的數據？`)) return;
-        vibrate([50, 50, 50]);
+        vibrate([50, 50, 50]); // 強震動提示
         if(currentTab === 'calc') {
             document.querySelectorAll('#page-calc input').forEach(el => el.value = "");
             [0,1,2].forEach(runCalc);
         } else {
             const inputs = document.querySelectorAll(`#page-${currentTab} input`);
             inputs.forEach(el => {
-                // 檢查是否為 A19 或 F19 的特殊處理
-                if (el.id === `${currentTab}-A19` || el.id === `${currentTab}-F19`) {
-                    const dropLen = (currentTab === 'dalin') ? 4 : 3;
-                    el.value = el.value.slice(0, -dropLen);
-                } else if(!el.readOnly && !el.classList.contains('text-yellow-300')) {
+                if(!el.readOnly && !el.classList.contains('text-yellow-300')) {
                     el.value = "";
-                    if(el.parentElement.classList.contains('bg-input-main')) el.parentElement.style.backgroundColor = "#2563eb";
+                    if(el.parentElement.classList.contains('bg-input-main')) el.parentElement.style.backgroundColor = "#2563eb"; 
                 }
             });
             calculate(currentTab);
         }
     }
+
     function runCalc(idx) {
         const tank = document.getElementById(`c-tank-${idx}`).value;
         const info = [
@@ -188,18 +181,20 @@
         document.getElementById(`${p}-rows`).innerHTML = h; updateTankInfo(p);
     }
 
-            for (let i = 20; i <= 29; i++) {
-            const val = bV[i-20] ?? "", aC = document.getElementById(`${p}-${colA + i}`), bC = document.getElementById(`${p}-${colB + i}`), cC = document.getElementById(`${p}-${colC + i}`);
-            if (val !== "") { 
-                bC.value = val; curA += val; curC += val; 
-                aC.value = Math.round(curA); cC.value = Math.round(curC); 
-                // V1.9.4: 字體自適應 (8位數自動縮小)
-                [aC, cC].forEach(el => {
-                    el.style.fontSize = el.value.length > 7 ? "9px" : "11px";
-                });
-            } else { bC.value = aC.value = cC.value = ""; }
-        }
+    function process(p, v4, v5, tE4, tE5, hA, hC, colA, colB, colC, hrs, b30Id, vCuId, stId) {
+        const c19 = parseFloat(document.getElementById(`${p}-${hC}`).value) || 0, targetValue = (Math.abs(c19 - v4) < Math.abs(c19 - v5)) ? tE4 : tE5, totalToDistribute = Math.ceil(targetValue) - c19;
+        document.getElementById(b30Id).value = totalToDistribute;
+        const count = Math.min(Math.floor(hrs), 10);
+        let base = Math.floor(totalToDistribute/count), rem = totalToDistribute % count;
+        let bV = new Array(count).fill(base);
+        for(let j=0; j<rem; j++) bV[j] += 1;
+        bV.sort(() => Math.random() - 0.5);
 
+        let curA = parseFloat(document.getElementById(`${p}-${hA}`).value) || 0, curC = c19;
+        for (let i = 20; i <= 29; i++) {
+            const val = bV[i-20] ?? "", aC = document.getElementById(`${p}-${colA + i}`), bC = document.getElementById(`${p}-${colB + i}`), cC = document.getElementById(`${p}-${colC + i}`);
+            if (val !== "") { bC.value = val; curA += val; curC += val; aC.value = Math.round(curA); cC.value = Math.round(curC); } else { bC.value = aC.value = cC.value = ""; }
+        }
         document.getElementById(vCuId).value = (curA - curC).toFixed(0);
         document.getElementById(stId).innerText = (curC - c19 === totalToDistribute) ? "OK" : "NG";
     }
@@ -212,35 +207,13 @@
         document.getElementById(`${p}-A4`).value = a4.toFixed(2); document.getElementById(`${p}-E4`).value = e4.toFixed(2); document.getElementById(`${p}-A5`).value = a5.toFixed(2); document.getElementById(`${p}-E5_total`).value = (a15 + a5).toFixed(2); document.getElementById(`${p}-A15`).value = a15.toFixed(2);
         const f15 = flow * hrs * rightC, f4 = (curH - startH) * (factor / 1000) * rightC, f5 = (c5Val - startH) * (factor / 1000) * rightC;
         document.getElementById(`${p}-F4`).value = f4.toFixed(2); document.getElementById(`${p}-H4`).value = (f4 + f15).toFixed(2); document.getElementById(`${p}-F5`).value = f5.toFixed(2); document.getElementById(`${p}-H5_total`).value = (f15 + f5).toFixed(2); document.getElementById(`${p}-F15`).value = f15.toFixed(2); document.getElementById(`${p}-G15`).value = hrs;
-    // V1.9.3 修改：C19 為 0/空白則顯示正常，否則判斷距離；並同步更新 D19 與 I19
-    const c19Input = document.getElementById(`${p}-C19`).value;
-    const c19Val = parseFloat(c19Input) || 0;
-    let noteText = "正常";
-
-    if (c19Input !== "" && c19Val !== 0) {
-        const distToA4 = Math.abs(c19Val - a4);
-        const distToA5 = Math.abs(c19Val - a5);
-        noteText = (distToA4 < distToA5) ? "打9小時" : "正常";
-    }
-    
-    // 同步更新左(D19)右(I19)備註位置
-    const d19Element = document.querySelector(`#${p}-rows tr:nth-child(2) td:nth-child(5)`); // 左側 colspan="2"
-    const i19Element = document.querySelector(`#${p}-rows tr:nth-child(2) td:last-child`);  // 右側最後一格
-    
-    [d19Element, i19Element].forEach(el => {
-        if (el) {
-            el.innerText = noteText;
-            el.className = (noteText === "打9小時") ? "text-red-400 font-bold text-center" : "text-green-400 text-center text-[10px]";
-        }
-    });
-
         process(p, a4, a5, e4, (a15 + a5), 'A19', 'C19', 'A', 'B', 'C', hrs, `${p}-B30`, `${p}-C31`, `${p}-B31`);
         process(p, f4, f5, (f4 + f15), (f15 + f5), 'F19', 'H19', 'F', 'G', 'H', hrs, `${p}-G30`, `${p}-H31`, `${p}-G31`);
     }
 
     function switchTab(t) { currentTab = t; document.querySelectorAll('.page-content').forEach(p => p.classList.add('hidden')); document.querySelectorAll('.tab-item').forEach(i => i.classList.remove('active')); document.getElementById(`page-${t}`).classList.remove('hidden'); document.getElementById(`btn-${t}`).classList.add('active'); }
     function updateTankInfo(p) { document.getElementById(`${p}-tank-factor`).value = config[p].tanks[document.getElementById(`${p}-tank-select`).value]; calculate(p); }
-    function saveData() { const data = {}; document.querySelectorAll('input, select').forEach(el => { if(el.id) data[el.id] = el.value; }); localStorage.setItem('oil_calc_v190', JSON.stringify(data)); document.getElementById('saveStatus').innerText = "SAVED"; setTimeout(()=>document.getElementById('saveStatus').innerText = "V1.9.4", 1000); }
+    function saveData() { const data = {}; document.querySelectorAll('input, select').forEach(el => { if(el.id) data[el.id] = el.value; }); localStorage.setItem('oil_calc_v190', JSON.stringify(data)); document.getElementById('saveStatus').innerText = "SAVED"; setTimeout(()=>document.getElementById('saveStatus').innerText = "V1.9.0", 1000); }
     function loadData() { const s = localStorage.getItem('oil_calc_v190'); if (s) { const d = JSON.parse(s); for(let id in d) { if(document.getElementById(id)) document.getElementById(id).value = d[id]; } } updateTankInfo('dalin'); updateTankInfo('takasago'); [0, 1, 2].forEach(runCalc); }
     async function toggleWakeLock() { try { wakeLock = await navigator.wakeLock.request('screen'); document.getElementById('wakeLockBtn').innerText = "🔆 常亮: 開"; } catch(e){} }
     

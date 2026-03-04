@@ -1,1 +1,250 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>油庫計算系統 V1.9.4</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #000; color: #fff; font-family: sans-serif; padding-bottom: 20px; overflow-x: hidden; }
+        .grid-table { border-collapse: separate; border-spacing: 0; width: 100%; min-width: 650px; table-layout: fixed; }
+        .grid-table td { border: 1px solid #333; padding: 2px; height: 35px; vertical-align: middle; text-align: center; font-size: 11px; overflow: hidden; }
+        /* V1.9.4 加寬 A 與 F 欄位權重 */
+        .grid-table td:nth-child(2), .grid-table td:nth-child(7) { width: 14%; } 
+        /* 同時縮小非關鍵欄位如 C, D, H, I 的寬度平衡 */
+        .grid-table td:nth-child(4), .grid-table td:nth-child(5), .grid-table td:nth-child(9), .grid-table td:nth-child(10) { width: 11%; }
+        .cell-label { background-color: #111; color: #555; width: 25px; font-size: 10px; border: none !important; }
+        
+        /* 計算機專用顏色 */
+        .bg-diesel { background-color: #443605 !important; } 
+        .bg-gas95 { background-color: #71710a !important; }  
+        .bg-gas92 { background-color: #1e3a8a !important; }  
+        
+        /* 色框格式 */
+        .dalin-gas-border { border: 2px solid #fde047 !important; } 
+        .dalin-dye-border { border: 2px solid #3b82f6 !important; } 
+        .takasago-gas-border { border: 2px solid #94a3b8 !important; } 
+        .takasago-dye-border { border: 2px solid #4b5563 !important; } 
+        
+        .divider { width: 8px !important; background-color: #000; border: none !important; }
+        .bg-input-main { background-color: #1e3a8a !important; }
+        .bg-input-flow { background-color: #581c87 !important; }
+        .bg-input-calc { background-color: #064e3b !important; }
+        .bg-manual-entry { background-color: #1a1a1a !important; }
 
+        /* 針對長數字(8位)優化 */
+        input { background: transparent; width: 100%; text-align: center; border: none; color: inherit; font-size: 12px; font-weight: bold; outline: none; }
+        input[readonly] { cursor: default; color: #94a3b8; font-weight: normal; font-size: 10px; }
+        select { background: transparent; width: 100%; text-align: center; border: none; color: #fff; font-size: 13px; font-weight: bold; outline: none; appearance: none; }
+        
+        .tab-bar { position: fixed; bottom: 0; left: 0; right: 0; background: #111; display: flex; border-top: 1px solid #444; height: 60px; z-index: 1000; }
+        .tab-item { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #888; font-weight: bold; cursor: pointer; border-right: 1px solid #222; }
+        #btn-calc.active { background: #16a34a; color: #fff; border-top: 4px solid #4ade80; }
+        #btn-dalin.active { background: #eab308; color: #000; border-top: 4px solid #fef08a; }
+        #btn-takasago.active { background: #4b5563; color: #fff; border-top: 4px solid #94a3b8; }
+        
+        /* 防止底部被 TabBar 遮住 */
+        .bottom-spacer { height: 80px; width: 100%; }
+    </style>
+</head>
+<body class="p-1">
+
+<div id="controls" class="w-full flex justify-between items-center mb-2 px-1">
+    <div class="flex gap-2">
+        <button onclick="saveData();vibrate(20);" class="px-3 py-1 bg-blue-600 rounded text-xs font-bold">💾 存檔</button>
+        <button onclick="handleReset();" class="px-3 py-1 bg-red-700 rounded text-xs font-bold">🧹 重置</button>
+        <button id="wakeLockBtn" onclick="toggleWakeLock();vibrate(15);" class="px-3 py-1 bg-gray-700 rounded text-xs font-bold">🔆 常亮: 偵測中</button>
+    </div>
+    <div id="saveStatus" class="text-[10px] text-slate-500 text-right font-mono">V1.9.4 - UI FIX</div>
+</div>
+
+<div id="page-calc" class="page-content overflow-x-auto">
+    <table class="grid-table mb-4">
+        <tr class="bg-black text-slate-500"><td class="cell-label"></td><td>A</td><td>B</td><td>C</td><td>D</td><td>E</td><td>F</td></tr>
+        <tr class="bg-slate-900 text-slate-400 text-[10px]"><td class="cell-label"></td><td>油槽</td><td>洪位(前/後)</td><td>管線發油/油槽係數</td><td>灌裝發油</td><td>累計實發</td><td>備註</td></tr>
+        <tbody id="calc-body"></tbody>
+    </table>
+    <div class="text-xs font-bold text-teal-500 mb-1">▼ 油槽資通手動紀錄表</div>
+    <table class="grid-table text-[10px]">
+        <tr class="bg-gray-800 text-white"><td>油槽</td><td>油品</td><td>油槽係數</td><td>8" 手</td><td>12" 手</td><td>洪位</td><td>量口</td><td>高程</td></tr>
+        <tbody id="info-table-body"></tbody>
+    </table>
+    <div class="bottom-spacer"></div>
+</div>
+
+<div id="page-dalin" class="page-content overflow-x-auto hidden">
+    <table class="grid-table" id="table-dalin"></table>
+    <div class="bottom-spacer"></div>
+</div>
+
+<div id="page-takasago" class="page-content overflow-x-auto hidden">
+    <table class="grid-table" id="table-takasago"></table>
+    <div class="bottom-spacer"></div>
+</div>
+
+<div class="tab-bar">
+    <div id="btn-calc" class="tab-item active" onclick="switchTab('calc');vibrate(10);"><span>計算機</span></div>
+    <div id="btn-dalin" class="tab-item" onclick="switchTab('dalin');vibrate(10);"><span>大林</span></div>
+    <div id="btn-takasago" class="tab-item" onclick="switchTab('takasago');vibrate(10);"><span>高松</span></div>
+</div>
+
+<script>
+    let currentTab = 'calc';
+    let wakeLock = null;
+
+    function vibrate(ms) { if (navigator.vibrate) { navigator.vibrate(ms); } }
+
+    const config = {
+        dalin: { theme: 'dalin', border: 'dalin', tanks: { "6": 2922.164, "7": 2922.614, "8": 2922.172, "9": 2921.181, "10": 2919.783, "11": 2920.007 }, tankLabels: { "6":"6 (95)", "7":"7 (95)", "8":"8 (95)", "9":"9 (95)", "10":"10 (92)", "11":"11 (92)" }, defaultTank: "11", leftLabel: "汽清", rightLabel: "藍染", leftC: 0.161, rightC: 0.017, startH: 10056, curH: 11489, flow: 251.8, leftTableStart: 22316221, rightTableStart: 36916, leftBatchStart: 0, rightBatchStart: 77 },
+        takasago: { theme: 'takasago', border: 'takasago', tanks: { "1": 2921.046, "2": 2921.831, "3": 2922.197, "4": 2919.682, "5": 2919.445 }, tankLabels: { "1":"1 (柴)", "2":"2 (柴)", "3":"3 (柴)", "4":"4 (柴)", "5":"5 (柴)" }, defaultTank: "1", leftLabel: "柴清", rightLabel: "柴潤", leftC: 0.040, rightC: 0.266, startH: 2678, curH: 4321, flow: 166.8, leftTableStart: 173681, rightTableStart: 99842437, leftBatchStart: 199, rightBatchStart: 1321 }
+    };
+
+    function init() {
+        // 生成計算機
+        const rows = [ {id:0, cls:'bg-diesel', group: ["1","2","3","4","5"]}, {id:1, cls:'bg-gas95', group: ["6","7","8","9"]}, {id:2, cls:'bg-gas92', group: ["10","11"]} ];
+        document.getElementById('calc-body').innerHTML = rows.map(r => `
+            <tr>
+                <td class="cell-label">${r.id+1}</td>
+                <td class="${r.cls}"><select id="c-tank-${r.id}" onchange="runCalc(${r.id});vibrate(5);">${r.group.map(k=>`<option value="${k}">${k}號</option>`).join('')}</select></td>
+                <td class="bg-input-calc"><input id="c-before-${r.id}" inputmode="decimal" placeholder="前" oninput="runCalc(${r.id});vibrate(5);"><div class="border-t border-teal-800"></div><input id="c-after-${r.id}" inputmode="decimal" placeholder="後" oninput="runCalc(${r.id});vibrate(5);"></td>
+                <td><div class="text-orange-400 font-bold text-xs" id="c-pipe-${r.id}">0</div><div class="border-t border-gray-800"></div><div class="text-gray-500 text-[9px]" id="c-factor-${r.id}">-</div></td>
+                <td class="text-xl font-black" id="c-res-${r.id}">0</td>
+                <td class="bg-input-calc"><input id="c-note-${r.id}" inputmode="decimal" oninput="runCalc(${r.id});vibrate(5);"></td>
+                <td class="bg-manual-entry"><input id="c-memo-${r.id}" oninput="vibrate(5);"></td>
+            </tr>
+        `).join('');
+
+        // 生成資通表
+        const allInfo = [{id: "1", type: "超柴", f: 2921.046, l: 18.5, h: 65, bg: "bg-diesel"},{id: "2", type: "超柴", f: 2921.831, l: 18.5, h: 67, bg: "bg-diesel"},{id: "3", type: "超柴", f: 2922.197, l: 18.5, h: 71, bg: "bg-diesel"},{id: "4", type: "超柴", f: 2919.682, l: 18.5, h: 66, bg: "bg-diesel"},{id: "5", type: "超柴", f: 2919.445, l: 18.5, h: 69, bg: "bg-diesel"},{id: "6", type: "95", f: 2922.164, l: 20.8, h: 73, bg: "bg-gas95"},{id: "7", type: "95", f: 2922.614, l: 20.8, h: 67, bg: "bg-gas95"},{id: "8", type: "95", f: 2922.172, l: 20.8, h: 61, bg: "bg-gas95"},{id: "9", type: "95", f: 2921.181, l: 20.8, h: 56, bg: "bg-gas95"},{id: "10", type: "92", f: 2919.783, l: 20.8, h: 53, bg: "bg-gas92"},{id: "11", type: "92", f: 2920.007, l: 20.8, h: 51, bg: "bg-gas92"}];
+        document.getElementById('info-table-body').innerHTML = allInfo.map(d => `
+            <tr>
+                <td class="${d.bg} font-bold">${d.id}</td><td class="bg-black">${d.type}</td><td class="font-mono">${d.f}</td>
+                <td class="bg-manual-entry"><input id="info-8h-${d.id}" inputmode="decimal" oninput="vibrate(5);"></td>
+                <td class="bg-manual-entry"><input id="info-12h-${d.id}" inputmode="decimal" oninput="vibrate(5);"></td>
+                <td class="bg-manual-entry"><input id="info-hw-${d.id}" inputmode="decimal" oninput="vibrate(5);"></td>
+                <td class="text-gray-500">${d.l}</td><td class="text-gray-500">${d.h}</td>
+            </tr>
+        `).join('');
+
+        renderStructure('dalin'); renderStructure('takasago'); loadData();
+    }
+
+    function handleReset() {
+        if(!confirm(`確定重置【${currentTab === 'calc' ? '計算機' : (currentTab === 'dalin' ? '大林' : '高松')}】的數據？`)) return;
+        vibrate([50, 50, 50]);
+        if(currentTab === 'calc') {
+            document.querySelectorAll('#page-calc input').forEach(el => el.value = "");
+            [0,1,2].forEach(runCalc);
+        } else {
+            const inputs = document.querySelectorAll(`#page-${currentTab} input`);
+            inputs.forEach(el => {
+                // 檢查是否為 A19 或 F19 的特殊處理
+                if (el.id === `${currentTab}-A19` || el.id === `${currentTab}-F19`) {
+                    const dropLen = (currentTab === 'dalin') ? 4 : 3;
+                    el.value = el.value.slice(0, -dropLen);
+                } else if(!el.readOnly && !el.classList.contains('text-yellow-300')) {
+                    el.value = "";
+                    if(el.parentElement.classList.contains('bg-input-main')) el.parentElement.style.backgroundColor = "#2563eb";
+                }
+            });
+            calculate(currentTab);
+        }
+    }
+    function runCalc(idx) {
+        const tank = document.getElementById(`c-tank-${idx}`).value;
+        const info = [
+            {id: "1", f: 2921.046},{id: "2", f: 2921.831},{id: "3", f: 2922.197},{id: "4", f: 2919.682},{id: "5", f: 2919.445},
+            {id: "6", f: 2922.164},{id: "7", f: 2922.614},{id: "8", f: 2922.172},{id: "9", f: 2921.181},
+            {id: "10", f: 2919.783},{id: "11", f: 2920.007}
+        ].find(d => d.id === tank);
+        const factor = info ? info.f : 0;
+        document.getElementById(`c-factor-${idx}`).innerText = factor;
+        const b = parseFloat(document.getElementById(`c-before-${idx}`).value) || 0, a = parseFloat(document.getElementById(`c-after-${idx}`).value) || 0, n = parseFloat(document.getElementById(`c-note-${idx}`).value) || 0;
+        if(b > 0 && a > 0) {
+            const e = (a - b) * (factor / 1000);
+            document.getElementById(`c-res-${idx}`).innerText = (e % 1 === 0) ? e.toFixed(0) : e.toFixed(1);
+            document.getElementById(`c-pipe-${idx}`).innerText = (e - n).toFixed(2);
+        }
+    }
+
+    function renderStructure(p) {
+        const c = config[p], b = c.border, table = document.getElementById(`table-${p}`);
+        let tankOpts = Object.keys(c.tanks).map(k => `<option value="${k}" ${k===c.defaultTank?'selected':''}>${c.tankLabels[k]}</option>`).join('');
+        table.innerHTML = `
+            <tr class="bg-black text-slate-500"><td class="cell-label"></td><td>A</td><td>B</td><td>C</td><td>D</td><td>E</td><td class="divider"></td><td>F</td><td>G</td><td>H</td><td>I</td></tr>
+            <tr><td class="cell-label">1</td><td class="text-slate-400 text-[10px]">油槽</td><td class="bg-input-main"><select id="${p}-tank-select" onchange="updateTankInfo('${p}');vibrate(5);">${tankOpts}</select></td><td class="text-slate-400 text-[10px]">係數</td><td colspan="2"><input id="${p}-tank-factor" readonly></td><td class="divider"></td><td colspan="4" class="text-yellow-500 font-bold">${c.leftLabel}|${c.rightLabel}</td></tr>
+            <tr class="bg-black font-bold text-[10px]"><td class="cell-label">3</td><td class="${b}-gas-border">應添</td><td class="${b}-gas-border">目前</td><td class="${b}-gas-border">T+1</td><td class="${b}-gas-border">起始</td><td class="${b}-gas-border">T+1累</td><td class="divider"></td><td class="${b}-dye-border">T累</td><td class="${b}-dye-border"></td><td class="${b}-dye-border">T+1累</td><td></td></tr>
+            <tr><td class="cell-label">4</td><td class="${b}-gas-border"><input id="${p}-A4" readonly></td><td class="${b}-gas-border">*</td><td class="${b}-gas-border"><input id="${p}-C4" readonly></td><td class="${b}-gas-border"><input id="${p}-D4" readonly></td><td class="${b}-gas-border"><input id="${p}-E4" readonly class="text-orange-400"></td><td class="divider"></td><td class="${b}-dye-border"><input id="${p}-F4" readonly></td><td class="${b}-dye-border"></td><td class="${b}-dye-border"><input id="${p}-H4" readonly class="text-orange-400"></td><td></td></tr>
+            <tr><td class="cell-label">5</td><td class="${b}-gas-border"><input id="${p}-A5" readonly></td><td class="${b}-gas-border bg-input-main"><input id="${p}-B5" inputmode="decimal" value="${c.curH}" oninput="calculate('${p}');vibrate(5);"></td><td class="${b}-gas-border"><input id="${p}-C5" readonly></td><td class="${b}-gas-border bg-input-main"><input id="${p}-D5_start" inputmode="decimal" value="${c.startH}" oninput="calculate('${p}');vibrate(5);"></td><td class="${b}-gas-border"><input id="${p}-E5_total" readonly class="text-yellow-400"></td><td class="divider"></td><td class="${b}-dye-border"><input id="${p}-F5" readonly></td><td class="${b}-dye-border"></td><td class="${b}-dye-border"><input id="${p}-H5_total" readonly class="text-yellow-400"></td><td></td></tr>
+            <tr class="bg-black font-bold text-[10px]"><td class="cell-label">14</td><td class="${b}-gas-border">本班${c.leftLabel}</td><td class="${b}-gas-border">時數</td><td class="${b}-gas-border">係數</td><td class="${b}-gas-border">時流</td><td></td><td class="divider"></td><td class="${b}-dye-border">本班${c.rightLabel}</td><td class="${b}-dye-border">時數</td><td class="${b}-dye-border">係數</td><td></td></tr>
+            <tr><td class="cell-label">15</td><td class="${b}-gas-border"><input id="${p}-A15" readonly></td><td class="${b}-gas-border bg-input-main"><input id="${p}-B15" inputmode="decimal" value="8.0" oninput="calculate('${p}');vibrate(5);"></td><td class="${b}-gas-border"><input id="${p}-C15" class="text-yellow-300" value="${c.leftC}" readonly></td><td class="${b}-gas-border bg-input-flow"><input id="${p}-D15_flow" inputmode="decimal" value="${c.flow}" oninput="calculate('${p}');vibrate(5);"></td><td></td><td class="divider"></td><td class="${b}-dye-border"><input id="${p}-F15" readonly></td><td class="${b}-dye-border"><input id="${p}-G15" readonly></td><td class="${b}-dye-border"><input id="${p}-H15_dye_c" class="text-yellow-300" value="${c.rightC}" readonly></td><td></td></tr>
+            <tbody id="${p}-rows"></tbody>
+            <tr><td class="cell-label">30</td><td class="${b}-gas-border">前驗</td><td class="${b}-gas-border"><input id="${p}-B30" readonly class="text-cyan-400"></td><td class="${b}-gas-border"><input id="${p}-C30" readonly class="text-orange-400"></td><td colspan="2" class="bg-teal-900"><input id="${p}-D30" oninput="vibrate(5);"></td><td class="divider"></td><td class="${b}-dye-border">前驗</td><td class="${b}-dye-border"><input id="${p}-G30" readonly class="text-cyan-400"></td><td class="${b}-dye-border"><input id="${p}-H30" readonly></td><td class="bg-teal-900"><input id="${p}-I30" oninput="vibrate(5);"></td></tr>
+            <tr><td class="cell-label">31</td><td class="${b}-gas-border">本驗</td><td id="${p}-B31" class="${b}-gas-border text-green-400 font-bold"></td><td class="${b}-gas-border"><input id="${p}-C31" readonly class="text-orange-400"></td><td colspan="2"></td><td class="divider"></td><td class="${b}-dye-border">本驗</td><td id="${p}-G31" class="${b}-dye-border text-green-400 font-bold"></td><td class="${b}-dye-border"><input id="${p}-H31" readonly></td><td></td></tr>
+        `;
+        let h = `<tr class="bg-black font-bold text-[10px]"><td class="cell-label">18</td><td class="${b}-gas-border">表格</td><td class="${b}-gas-border">單次</td><td class="${b}-gas-border">批累</td><td colspan="2"></td><td class="divider"></td><td class="${b}-dye-border">表格</td><td class="${b}-dye-border">單次</td><td class="${b}-dye-border">批累</td><td></td></tr>`;
+        h += `<tr><td class="cell-label">19</td><td class="${b}-gas-border bg-input-main"><input id="${p}-A19" inputmode="tel" value="${c.leftTableStart}" oninput="calculate('${p}');vibrate(5);"></td><td class="${b}-gas-border">0</td><td class="${b}-gas-border bg-input-main"><input id="${p}-C19" inputmode="decimal" value="${c.leftBatchStart}" oninput="calculate('${p}');vibrate(5);"></td><td colspan="2">START</td><td class="divider"></td><td class="${b}-dye-border bg-input-main"><input id="${p}-F19" inputmode="tel" value="${c.rightTableStart}" oninput="calculate('${p}');vibrate(5);"></td><td class="${b}-dye-border">0</td><td class="${b}-dye-border bg-input-main"><input id="${p}-H19" inputmode="decimal" value="${c.rightBatchStart}" oninput="calculate('${p}');vibrate(5);"></td><td></td></tr>`;
+        for(let i=20;i<=29;i++) h+=`<tr><td class="cell-label">${i}</td><td class="${b}-gas-border"><input id="${p}-A${i}" readonly></td><td class="${b}-gas-border"><input id="${p}-B${i}" readonly></td><td class="${b}-gas-border"><input id="${p}-C${i}" readonly></td><td colspan="2"></td><td class="divider"></td><td class="${b}-dye-border"><input id="${p}-F${i}" readonly></td><td class="${b}-dye-border"><input id="${p}-G${i}" readonly></td><td class="${b}-dye-border"><input id="${p}-H${i}" readonly></td><td></td></tr>`;
+        document.getElementById(`${p}-rows`).innerHTML = h; updateTankInfo(p);
+    }
+
+            for (let i = 20; i <= 29; i++) {
+            const val = bV[i-20] ?? "", aC = document.getElementById(`${p}-${colA + i}`), bC = document.getElementById(`${p}-${colB + i}`), cC = document.getElementById(`${p}-${colC + i}`);
+            if (val !== "") { 
+                bC.value = val; curA += val; curC += val; 
+                aC.value = Math.round(curA); cC.value = Math.round(curC); 
+                // V1.9.4: 字體自適應 (8位數自動縮小)
+                [aC, cC].forEach(el => {
+                    el.style.fontSize = el.value.length > 7 ? "9px" : "11px";
+                });
+            } else { bC.value = aC.value = cC.value = ""; }
+        }
+
+        document.getElementById(vCuId).value = (curA - curC).toFixed(0);
+        document.getElementById(stId).innerText = (curC - c19 === totalToDistribute) ? "OK" : "NG";
+    }
+
+    function calculate(p) {
+        const factor = parseFloat(document.getElementById(`${p}-tank-factor`).value) || 0, curH = parseFloat(document.getElementById(`${p}-B5`).value) || 0, startH = parseFloat(document.getElementById(`${p}-D5_start`).value) || 0, hrs = parseFloat(document.getElementById(`${p}-B15`).value) || 0, flow = parseFloat(document.getElementById(`${p}-D15_flow`).value) || 0, leftC = parseFloat(document.getElementById(`${p}-C15`).value) || 0, rightC = parseFloat(document.getElementById(`${p}-H15_dye_c`).value) || 0;
+        const c5Val = curH + (flow / (factor / 1000));
+        document.getElementById(`${p}-C5`).value = Math.round(c5Val); document.getElementById(`${p}-C4`).value = curH; document.getElementById(`${p}-D4`).value = startH;
+        const a15 = flow * hrs * leftC, a4 = (curH - startH) * (factor / 1000) * leftC, e4 = a4 + a15, a5 = (c5Val - startH) * (factor / 1000) * leftC;
+        document.getElementById(`${p}-A4`).value = a4.toFixed(2); document.getElementById(`${p}-E4`).value = e4.toFixed(2); document.getElementById(`${p}-A5`).value = a5.toFixed(2); document.getElementById(`${p}-E5_total`).value = (a15 + a5).toFixed(2); document.getElementById(`${p}-A15`).value = a15.toFixed(2);
+        const f15 = flow * hrs * rightC, f4 = (curH - startH) * (factor / 1000) * rightC, f5 = (c5Val - startH) * (factor / 1000) * rightC;
+        document.getElementById(`${p}-F4`).value = f4.toFixed(2); document.getElementById(`${p}-H4`).value = (f4 + f15).toFixed(2); document.getElementById(`${p}-F5`).value = f5.toFixed(2); document.getElementById(`${p}-H5_total`).value = (f15 + f5).toFixed(2); document.getElementById(`${p}-F15`).value = f15.toFixed(2); document.getElementById(`${p}-G15`).value = hrs;
+    // V1.9.3 修改：C19 為 0/空白則顯示正常，否則判斷距離；並同步更新 D19 與 I19
+    const c19Input = document.getElementById(`${p}-C19`).value;
+    const c19Val = parseFloat(c19Input) || 0;
+    let noteText = "正常";
+
+    if (c19Input !== "" && c19Val !== 0) {
+        const distToA4 = Math.abs(c19Val - a4);
+        const distToA5 = Math.abs(c19Val - a5);
+        noteText = (distToA4 < distToA5) ? "打9小時" : "正常";
+    }
+    
+    // 同步更新左(D19)右(I19)備註位置
+    const d19Element = document.querySelector(`#${p}-rows tr:nth-child(2) td:nth-child(5)`); // 左側 colspan="2"
+    const i19Element = document.querySelector(`#${p}-rows tr:nth-child(2) td:last-child`);  // 右側最後一格
+    
+    [d19Element, i19Element].forEach(el => {
+        if (el) {
+            el.innerText = noteText;
+            el.className = (noteText === "打9小時") ? "text-red-400 font-bold text-center" : "text-green-400 text-center text-[10px]";
+        }
+    });
+
+        process(p, a4, a5, e4, (a15 + a5), 'A19', 'C19', 'A', 'B', 'C', hrs, `${p}-B30`, `${p}-C31`, `${p}-B31`);
+        process(p, f4, f5, (f4 + f15), (f15 + f5), 'F19', 'H19', 'F', 'G', 'H', hrs, `${p}-G30`, `${p}-H31`, `${p}-G31`);
+    }
+
+    function switchTab(t) { currentTab = t; document.querySelectorAll('.page-content').forEach(p => p.classList.add('hidden')); document.querySelectorAll('.tab-item').forEach(i => i.classList.remove('active')); document.getElementById(`page-${t}`).classList.remove('hidden'); document.getElementById(`btn-${t}`).classList.add('active'); }
+    function updateTankInfo(p) { document.getElementById(`${p}-tank-factor`).value = config[p].tanks[document.getElementById(`${p}-tank-select`).value]; calculate(p); }
+    function saveData() { const data = {}; document.querySelectorAll('input, select').forEach(el => { if(el.id) data[el.id] = el.value; }); localStorage.setItem('oil_calc_v190', JSON.stringify(data)); document.getElementById('saveStatus').innerText = "SAVED"; setTimeout(()=>document.getElementById('saveStatus').innerText = "V1.9.4", 1000); }
+    function loadData() { const s = localStorage.getItem('oil_calc_v190'); if (s) { const d = JSON.parse(s); for(let id in d) { if(document.getElementById(id)) document.getElementById(id).value = d[id]; } } updateTankInfo('dalin'); updateTankInfo('takasago'); [0, 1, 2].forEach(runCalc); }
+    async function toggleWakeLock() { try { wakeLock = await navigator.wakeLock.request('screen'); document.getElementById('wakeLockBtn').innerText = "🔆 常亮: 開"; } catch(e){} }
+    
+    init();
+</script>
+</body>
+</html>
